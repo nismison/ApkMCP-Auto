@@ -1,26 +1,27 @@
-#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 # /// script
 # requires-python = ">=3.10"
-# dependencies = [ "fastmcp>=3.0.2", "httpx" ]
+# dependencies = [ "fastmcp>=3.0.2" ]
 # ///
 
 """
-Copyright (c) 2025 jadx mcp server developer(s) (https://github.com/zinja-coder/jadx-ai-mcp)
-See the file 'LICENSE' for copying permission
+JADX MCP Server - Headless CLI Edition
+基于 JADX CLI 官方命令行引擎实现，无需 JADX-GUI 介入。
+支持全自动将 APK 反编译为 Java 源码工程，检索类、方法、源码与清单文件。
 """
 
+import os
+import sys
 import argparse
 import logging
-import sys
+import subprocess
+import shutil
+from pathlib import Path
+from typing import Dict, List, Optional, Any
 from fastmcp import FastMCP
-from src.banner import jadx_mcp_server_banner
-from src.server import config, tools
-
-# Initialize MCP Server
-mcp = FastMCP("JADX-AI-MCP Plugin Reverse Engineering Server")
 
 # Bootstrap logger — always writes to stderr to keep stdout clean for stdio transport
-logger = logging.getLogger("jadx-mcp-server.bootstrap")
+logger = logging.getLogger("jadx-mcp-server")
 if not logger.handlers:
     handler = logging.StreamHandler(sys.stderr)
     handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
@@ -28,328 +29,296 @@ if not logger.handlers:
 logger.setLevel(logging.INFO)
 logger.propagate = False
 
-# Import and register ALL tools using correct FastMCP pattern
-from src.server.tools.class_tools import (
-    fetch_current_class, get_selected_text, get_class_source,
-    get_all_classes, get_methods_of_class, get_fields_of_class, get_smali_of_class,
-    get_main_application_classes_names, get_main_application_classes_code, get_main_activity_class
-)
-from src.server.tools.search_tools import (
-    get_method_by_name, search_method_by_name, search_classes_by_keyword
-)
-from src.server.tools.resource_tools import (
-    get_manifest_component, get_android_manifest, get_strings, get_all_resource_file_names,
-    get_resource_file
-)
-from src.server.tools.refactor_tools import (
-    rename_class, rename_method, rename_field, rename_package, rename_variable
-)
-from src.server.tools.debug_tools import (
-    debug_get_stack_frames, debug_get_threads, debug_get_variables
-)
-from src.server.tools.xrefs_tools import (
-    get_xrefs_to_class, get_xrefs_to_method, get_xrefs_to_field
-)
+# Parse arguments
+parser = argparse.ArgumentParser("JADX Headless MCP Server")
+parser.add_argument("--http", help="Serve MCP Server over HTTP stream.", action="store_true", default=False)
+parser.add_argument("--host", help="Host address to bind for --http (default: 127.0.0.1)", default="127.0.0.1", type=str)
+parser.add_argument("--port", help="Port for --http (default:8651)", default=8651, type=int)
+parser.add_argument("--workspace", help="Workspace directory for decompiled projects", default="tools/workspace/jadx", type=str)
+parser.add_argument("--jadx-path", help="Path to jadx.bat or jadx binary", default=None, type=str)
+args, _ = parser.parse_known_args()
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+WORKSPACE_DIR = Path(args.workspace) if os.path.isabs(args.workspace) else PROJECT_ROOT / args.workspace
+WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
 
-# CORRECT REGISTRATION PATTERN for FastMCP
-@mcp.tool()
-async def fetch_current_class() -> dict:
-    """Fetch the currently selected class and its code from the JADX-GUI plugin."""
-    return await tools.class_tools.fetch_current_class()
+# Determine jadx path
+if args.jadx_path:
+    JADX_BIN = Path(args.jadx_path)
+else:
+    local_jadx = PROJECT_ROOT / "tools" / "bin" / "jadx" / "bin" / "jadx.bat"
+    if local_jadx.exists():
+        JADX_BIN = local_jadx
+    else:
+        which_jadx = shutil.which("jadx")
+        JADX_BIN = Path(which_jadx) if which_jadx else local_jadx
 
+# Ensure embedded JRE is in JAVA_HOME if available
+embedded_jre = PROJECT_ROOT / "tools" / "bin" / "jre"
+if embedded_jre.exists() and "JAVA_HOME" not in os.environ:
+    os.environ["JAVA_HOME"] = str(embedded_jre)
 
-@mcp.tool()
-async def get_selected_text() -> dict:
-    """Returns the currently selected text in the decompiled code view."""
-    return await tools.class_tools.get_selected_text()
+mcp = FastMCP("JADX-Headless-MCP-Server")
 
 
 @mcp.tool()
-async def get_method_by_name(class_name: str, method_name: str) -> dict:
-    """Fetch the source code of a method from a specific class."""
-    return await tools.search_tools.get_method_by_name(class_name, method_name)
+async def health_check() -> Dict[str, Any]:
+    """Check JADX CLI availability and environment status."""
+    jadx_exists = JADX_BIN.exists()
+    version = "unknown"
+    if jadx_exists:
+        try:
+            res = subprocess.run([str(JADX_BIN), "--version"], capture_output=True, text=True, timeout=10)
+            version = res.stdout.strip() or res.stderr.strip()
+        except Exception as e:
+            version = f"error: {e}"
+    return {
+        "success": jadx_exists,
+        "jadx_path": str(JADX_BIN),
+        "jadx_exists": jadx_exists,
+        "jadx_version": version,
+        "workspace": str(WORKSPACE_DIR),
+        "java_home": os.environ.get("JAVA_HOME")
+    }
 
 
 @mcp.tool()
-async def get_all_classes(offset: int = 0, count: int = 0) -> dict:
-    """Returns a list of all classes in the project with pagination support."""
-    return await tools.class_tools.get_all_classes(offset, count)
-
-
-@mcp.tool()
-async def get_class_source(class_name: str) -> dict:
-    """Fetch the Java source of a specific class."""
-    return await tools.class_tools.get_class_source(class_name)
-
-
-@mcp.tool()
-async def search_method_by_name(method_name: str) -> dict:
-    """Search for a method name across all classes."""
-    return await tools.search_tools.search_method_by_name(method_name)
-
-
-@mcp.tool()
-async def get_methods_of_class(class_name: str) -> dict:
-    """List all method names in a class."""
-    return await tools.class_tools.get_methods_of_class(class_name)
-
-
-@mcp.tool()
-async def search_classes_by_keyword(
-    search_term: str,
-    package: str = "",
-    search_in: str = "code",
-    offset: int = 0,
-    count: int = 20,
-) -> dict:
-    """Search for classes containing a specific keyword with flexible filtering options.
-
-    This tool performs a comprehensive search across decompiled Android code, allowing you to:
-    1. Search within specific packages by providing a package name
-    2. Target specific search scopes (class names, method names, fields, code content, comments)
-    3. Combine multiple search scopes for precise results
+async def decompile_apk(
+    apk_path: str,
+    project_name: Optional[str] = None,
+    deobfuscation: bool = False,
+    threads_count: int = 4
+) -> Dict[str, Any]:
+    """
+    Decompile an APK file directly to Java source code using JADX CLI without GUI.
 
     Args:
-        search_term: The keyword or string to search for. This is the main search query.
+        apk_path: Path to the APK file to decompile
+        project_name: Optional project folder name (defaults to apk file name)
+        deobfuscation: Whether to enable deobfuscation (--deobf)
+        threads_count: Number of processing threads (default: 4)
+    """
+    apk_file = Path(apk_path)
+    if not apk_file.exists():
+        apk_file = PROJECT_ROOT / apk_path
+        if not apk_file.exists():
+            return {"success": False, "error": f"APK not found: {apk_path}"}
 
-        package (optional): Package name to limit the search scope.
-            - If empty string (default), searches across all packages in the APK
-            - If provided, only searches within classes belonging to the specified package
-            - Example: "com.example.app" to search only in that package
+    if not project_name:
+        project_name = apk_file.stem
 
-        search_in (optional): Comma-separated list of search scopes to target.
-            Valid values:
-            - "class": Search in class names only
-            - "method": Search in method names only
-            - "field": Search in field names only
-            - "code": Search in code content (method bodies, statements, etc.)
-            - "comment": Search in comments
+    out_dir = WORKSPACE_DIR / project_name
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-            You can specify one or multiple scopes:
-            - Single scope: "class" (only class names)
-            - Multiple scopes: "class,method" (class names OR method names)
-            - Combined: "class,method,code" (searches in all three scopes)
+    cmd = [str(JADX_BIN), "-d", str(out_dir), "-j", str(threads_count)]
+    if deobfuscation:
+        cmd.append("--deobf")
+    cmd.append(str(apk_file))
 
-            Default: "code" (searches in code content)
-
-        offset (optional): Starting index for pagination. Default: 0
-        count (optional): Maximum number of results to return. Default: 20
-
-    Returns:
-        dict: Paginated list of classes containing the search term, with metadata about matches
-
-    MCP Tool: search_classes_by_keyword
-    Description: Advanced search tool that finds classes matching a keyword with package filtering
-                 and scope targeting capabilities. Use this when you need to find specific code
-                 patterns, class names, method names, or other identifiers across the decompiled APK."""
-    return await tools.search_tools.search_classes_by_keyword(
-        search_term, package, search_in, offset, count
-    )
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        return {
+            "success": proc.returncode == 0,
+            "project_dir": str(out_dir),
+            "stdout": proc.stdout[-2000:] if proc.stdout else "",
+            "stderr": proc.stderr[-2000:] if proc.stderr else "",
+            "exit_code": proc.returncode
+        }
+    except Exception as e:
+        return {"success": False, "error": f"Failed to run JADX: {str(e)}"}
 
 
 @mcp.tool()
-async def get_fields_of_class(class_name: str) -> dict:
-    """List all field names in a class."""
-    return await tools.class_tools.get_fields_of_class(class_name)
+async def get_class_source(project_dir: str, class_name: str) -> Dict[str, Any]:
+    """
+    Fetch the Java source code of a specific class.
+
+    Args:
+        project_dir: Path to the decompiled project directory
+        class_name: Full class name (e.g. 'com.example.MainActivity') or relative path
+    """
+    proj_path = Path(project_dir)
+    if not proj_path.is_absolute():
+        proj_path = PROJECT_ROOT / project_dir
+
+    sources_dir = proj_path / "sources"
+    if not sources_dir.exists():
+        sources_dir = proj_path
+
+    # Try exact match by class name converted to path
+    rel_path = class_name.replace(".", "/") + ".java"
+    target_file = sources_dir / rel_path
+
+    if not target_file.exists():
+        # Case insensitive or partial search
+        simple_name = class_name.split(".")[-1] + ".java"
+        candidates = list(sources_dir.rglob(simple_name))
+        if candidates:
+            target_file = candidates[0]
+
+    if target_file.exists():
+        try:
+            with open(target_file, "r", encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+            return {
+                "success": True,
+                "class_name": class_name,
+                "file_path": str(target_file),
+                "source": content
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Failed to read source: {str(e)}"}
+
+    return {"success": False, "error": f"Class '{class_name}' not found in {sources_dir}"}
 
 
 @mcp.tool()
-async def get_smali_of_class(class_name: str) -> dict:
-    """Fetch the smali representation of a class."""
-    return await tools.class_tools.get_smali_of_class(class_name)
+async def list_classes(
+    project_dir: str,
+    package_prefix: Optional[str] = None,
+    offset: int = 0,
+    count: int = 100
+) -> Dict[str, Any]:
+    """
+    List all decompiled Java classes in the project with pagination.
+
+    Args:
+        project_dir: Path to the decompiled project directory
+        package_prefix: Optional package filter (e.g. 'com.example')
+        offset: Starting offset for pagination
+        count: Number of classes to return (default: 100)
+    """
+    proj_path = Path(project_dir)
+    if not proj_path.is_absolute():
+        proj_path = PROJECT_ROOT / project_dir
+
+    sources_dir = proj_path / "sources"
+    if not sources_dir.exists():
+        sources_dir = proj_path
+
+    if not sources_dir.exists():
+        return {"success": False, "error": f"Source directory not found: {sources_dir}"}
+
+    all_classes = []
+    for root, _, files in os.walk(sources_dir):
+        for f in files:
+            if f.endswith(".java"):
+                full_path = Path(root) / f
+                rel_parts = full_path.relative_to(sources_dir).with_suffix("").parts
+                fqcn = ".".join(rel_parts)
+                if not package_prefix or fqcn.startswith(package_prefix):
+                    all_classes.append(fqcn)
+
+    all_classes.sort()
+    total = len(all_classes)
+    paged = all_classes[offset: offset + count] if count > 0 else all_classes[offset:]
+
+    return {
+        "success": True,
+        "total": total,
+        "offset": offset,
+        "count": len(paged),
+        "classes": paged
+    }
 
 
 @mcp.tool()
-async def get_manifest_component(component_type: str, only_exported: bool = False) -> dict:
-    """Retrieve specified component data from AndroidManifest.xml, support filter exported components.
-    Support standard Android components: activity, provider, service, receiver."""
-    return await tools.resource_tools.get_manifest_component(component_type, only_exported)
+async def search_java_code(
+    project_dir: str,
+    keyword: str,
+    case_sensitive: bool = False,
+    max_results: int = 50
+) -> Dict[str, Any]:
+    """
+    Search for a keyword or string pattern across all decompiled Java code.
+
+    Args:
+        project_dir: Path to the decompiled project directory
+        keyword: String to search for
+        case_sensitive: Case sensitivity flag
+        max_results: Max matched items to return (default: 50)
+    """
+    proj_path = Path(project_dir)
+    if not proj_path.is_absolute():
+        proj_path = PROJECT_ROOT / project_dir
+
+    sources_dir = proj_path / "sources"
+    if not sources_dir.exists():
+        sources_dir = proj_path
+
+    results = []
+    target_kw = keyword if case_sensitive else keyword.lower()
+
+    for root, _, files in os.walk(sources_dir):
+        for f in files:
+            if f.endswith(".java"):
+                file_path = Path(root) / f
+                try:
+                    with open(file_path, "r", encoding="utf-8", errors="ignore") as file_obj:
+                        lines = file_obj.readlines()
+                    for idx, line in enumerate(lines, 1):
+                        cmp_line = line if case_sensitive else line.lower()
+                        if target_kw in cmp_line:
+                            rel_class = ".".join(file_path.relative_to(sources_dir).with_suffix("").parts)
+                            results.append({
+                                "class": rel_class,
+                                "line": idx,
+                                "content": line.strip()
+                            })
+                            if len(results) >= max_results:
+                                return {
+                                    "success": True,
+                                    "results": results,
+                                    "truncated": True,
+                                    "total_found": len(results)
+                                }
+                except Exception:
+                    continue
+
+    return {
+        "success": True,
+        "results": results,
+        "truncated": False,
+        "total_found": len(results)
+    }
 
 
 @mcp.tool()
-async def get_android_manifest() -> dict:
-    """Retrieve and return the AndroidManifest.xml content."""
-    return await tools.resource_tools.get_android_manifest()
+async def get_android_manifest(project_dir: str) -> Dict[str, Any]:
+    """
+    Get the AndroidManifest.xml from the decompiled project.
 
+    Args:
+        project_dir: Path to the decompiled project directory
+    """
+    proj_path = Path(project_dir)
+    if not proj_path.is_absolute():
+        proj_path = PROJECT_ROOT / project_dir
 
-@mcp.tool()
-async def get_strings(offset: int = 0, count: int = 0) -> dict:
-    """Retrieve contents of strings.xml files."""
-    return await tools.resource_tools.get_strings(offset, count)
+    manifest_candidates = [
+        proj_path / "resources" / "AndroidManifest.xml",
+        proj_path / "AndroidManifest.xml"
+    ]
 
+    for manifest in manifest_candidates:
+        if manifest.exists():
+            try:
+                with open(manifest, "r", encoding="utf-8", errors="ignore") as f:
+                    return {
+                        "success": True,
+                        "manifest_path": str(manifest),
+                        "content": f.read()
+                    }
+            except Exception as e:
+                return {"success": False, "error": f"Failed reading manifest: {str(e)}"}
 
-@mcp.tool()
-async def get_all_resource_file_names(offset: int = 0, count: int = 0) -> dict:
-    """Retrieve all resource files names."""
-    return await tools.resource_tools.get_all_resource_file_names(offset, count)
-
-
-@mcp.tool()
-async def get_resource_file(resource_name: str) -> dict:
-    """Retrieve resource file content."""
-    return await tools.resource_tools.get_resource_file(resource_name)
-
-
-@mcp.tool()
-async def get_main_application_classes_names() -> dict:
-    """Fetch main application classes' names from Manifest package."""
-    return await tools.class_tools.get_main_application_classes_names()
-
-
-@mcp.tool()
-async def get_main_application_classes_code(offset: int = 0, count: int = 0) -> dict:
-    """Fetch main application classes' code with pagination."""
-    return await tools.class_tools.get_main_application_classes_code(offset, count)
-
-
-@mcp.tool()
-async def get_main_activity_class() -> dict:
-    """Fetch the main activity class from AndroidManifest.xml."""
-    return await tools.class_tools.get_main_activity_class()
-
-
-@mcp.tool()
-async def rename_class(class_name: str, new_name: str) -> dict:
-    """Renames a specific class."""
-    return await tools.refactor_tools.rename_class(class_name, new_name)
-
-
-@mcp.tool()
-async def rename_method(method_name: str, new_name: str) -> dict:
-    """Renames a specific method."""
-    return await tools.refactor_tools.rename_method(method_name, new_name)
-
-
-@mcp.tool()
-async def rename_field(class_name: str, field_name: str, new_name: str) -> dict:
-    """Renames a specific field."""
-    return await tools.refactor_tools.rename_field(class_name, field_name, new_name)
-
-
-@mcp.tool()
-async def rename_package(old_package_name: str, new_package_name: str) -> dict:
-    """Renames a package and all its classes."""
-    return await tools.refactor_tools.rename_package(old_package_name, new_package_name)
-
-
-@mcp.tool()
-async def rename_variable(class_name: str, method_name: str, variable_name: str, new_name: str, reg: str = None, ssa: str = None) -> dict:
-    """Renames a specific variable in a method."""
-    return await tools.refactor_tools.rename_variable(class_name, method_name, variable_name, new_name, reg, ssa)
-
-
-@mcp.tool()
-async def debug_get_stack_frames() -> dict:
-    """Get current stack frames (call stack)."""
-    return await tools.debug_tools.debug_get_stack_frames()
-
-
-@mcp.tool()
-async def debug_get_threads() -> dict:
-    """Get all threads in the debugged process."""
-    return await tools.debug_tools.debug_get_threads()
-
-
-@mcp.tool()
-async def debug_get_variables() -> dict:
-    """Get current variables when process is suspended."""
-    return await tools.debug_tools.debug_get_variables()
-
-
-@mcp.tool()
-async def get_xrefs_to_class(class_name: str, offset: int = 0, count: int = 20) -> dict:
-    """Find all references to a class."""
-    return await tools.xrefs_tools.get_xrefs_to_class(class_name, offset, count)
-
-
-@mcp.tool()
-async def get_xrefs_to_method(
-    class_name: str, method_name: str, offset: int = 0, count: int = 20
-) -> dict:
-    """Find all references to a method."""
-    return await tools.xrefs_tools.get_xrefs_to_method(
-        class_name, method_name, offset, count
-    )
-
-
-@mcp.tool()
-async def get_xrefs_to_field(
-    class_name: str, field_name: str, offset: int = 0, count: int = 20
-) -> dict:
-    """Find all references to a field."""
-    return await tools.xrefs_tools.get_xrefs_to_field(
-        class_name, field_name, offset, count
-    )
+    return {"success": False, "error": "AndroidManifest.xml not found"}
 
 
 def main():
-    parser = argparse.ArgumentParser("MCP Server for Jadx")
-    parser.add_argument(
-        "--http",
-        help="Serve MCP Server over HTTP stream.",
-        action="store_true",
-        default=False,
-    )
-    parser.add_argument(
-        "--host",
-        help="Host address to bind for --http (default: 127.0.0.1, use 0.0.0.0 for remote access). "
-             "WARNING: non-localhost binds expose the server over plain HTTP with no authentication.",
-        default="127.0.0.1",
-        type=str
-    )
-    parser.add_argument(
-        "--port", help="Port for --http (default:8651)", default=8651, type=int
-    )
-    parser.add_argument(
-        "--jadx-port",
-        help="JADX AI MCP Plugin port (default:8650)",
-        default=8650,
-        type=int,
-    )
-    parser.add_argument(
-        "--jadx-host",
-        help="JADX AI MCP Plugin host (default:127.0.0.1). "
-             "Security: non-localhost may expose plugin to network; use trusted network/firewall.",
-        default="127.0.0.1",
-        type=str,
-    )
-    args = parser.parse_args()
-
-    # Configure
-    config.set_jadx_host(args.jadx_host)
-    config.set_jadx_port(args.jadx_port)
-
-    # Security warning for non-localhost bind address
-    if args.host not in ("127.0.0.1", "localhost", "::1"):
-        logger.warning(
-            "\n⚠️  SECURITY WARNING: Binding to non-localhost address '%s'.\n"
-            "   The MCP server uses plain HTTP with NO authentication.\n"
-            "   Anyone on the network can connect and use all MCP tools.\n"
-            "   Only use this on trusted networks or behind a firewall.",
-            args.host
-        )
-
-    # Banner & Health Check — always logs to stderr to keep stdout clean for stdio transport
-    try:
-        logger.info(jadx_mcp_server_banner())
-    except Exception:
-        logger.info(
-            "[JADX AI MCP Server] v3.3.5 | MCP Port: %s | JADX Host: %s | JADX Port: %s",
-            args.port,
-            args.jadx_host,
-            args.jadx_port,
-        )
-
-    logger.info("Testing JADX AI MCP Plugin connectivity...")
-    result = config.health_ping()
-    logger.info("Health check result: %s", result)
-
-    # Run Server
     if args.http:
         mcp.run(transport="streamable-http", host=args.host, port=args.port)
     else:
-        # StdIO transport must keep stdout reserved for MCP frames.
         mcp.run()
 
 

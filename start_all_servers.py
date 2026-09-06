@@ -30,10 +30,12 @@ SERVERS_CONFIG = {
     "jadx": {
         "name": "JADX MCP Server",
         "script": PROJECT_ROOT / "tools" / "jadx" / "server.py",
-        "jar": PROJECT_ROOT / "tools" / "jadx" / "server.jar",
         "port": 8651,
-        "args": [],
-        "use_java": True
+        "args": [
+            "--workspace", "tools/workspace/jadx",
+            "--jadx-path", "tools/bin/jadx/bin/jadx.bat"
+        ],
+        "use_java": False
     },
     "apktool": {
         "name": "APKTool MCP Server",

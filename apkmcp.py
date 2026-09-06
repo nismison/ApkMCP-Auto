@@ -114,10 +114,14 @@ class ApkMCPManager:
         tools[ToolType.JADX] = ToolConfig(
             name="jadx-mcp-server",
             tool_type=ToolType.JADX,
-            server_path=self._get_relative_path(self.base_path / "jadx" / "server.jar"),
+            server_path=self._get_relative_path(self.base_path / "jadx" / "server.py"),
             requirements_path=self._get_relative_path(self.base_path / "jadx" / "requirements.txt"),
             port=self.DEFAULT_PORTS[ToolType.JADX],
-            description="JADX MCP 服务器 - Java 反编译分析"
+            description="JADX MCP 服务器 - Java 反编译分析",
+            extra_args=[
+                "--workspace", self._get_relative_path(self.workspace_path / "jadx"),
+                "--jadx-path", self._get_relative_path(self.bin_path / "jadx" / "bin" / "jadx.bat")
+            ]
         )
 
         tools[ToolType.APKTOOL] = ToolConfig(
