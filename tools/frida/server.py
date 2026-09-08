@@ -23,10 +23,12 @@ Frida MCP Server - 基于 FastMCP 的 Frida 动态插桩服务
 import json
 import threading
 import time
+import os
 from typing import Any, Dict, List, Optional, Union
 from dataclasses import dataclass, field
 
 import frida
+os.environ["FASTMCP_LOG_ENABLED"] = "false"
 from fastmcp import FastMCP
 
 

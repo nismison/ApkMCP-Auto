@@ -24,6 +24,8 @@ import json
 import time
 from typing import List, Union, Dict, Optional
 from pathlib import Path
+
+os.environ["FASTMCP_LOG_ENABLED"] = "false"
 from fastmcp import FastMCP
 
 # 配置日志

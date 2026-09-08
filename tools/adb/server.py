@@ -17,6 +17,8 @@ import time
 import re
 from typing import List, Dict, Optional, Any
 from pathlib import Path
+
+os.environ["FASTMCP_LOG_ENABLED"] = "false"
 from fastmcp import FastMCP
 
 # 设置日志配置

@@ -5,3 +5,4 @@ __pycache__/
 
 # Large binaries / jar
 tools/bin/jadx/lib/jadx-*-all.jar
+tools/workspace/

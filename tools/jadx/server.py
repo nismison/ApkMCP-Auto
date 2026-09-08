@@ -18,6 +18,8 @@ import subprocess
 import shutil
 from pathlib import Path
 from typing import Dict, List, Optional, Any
+
+os.environ["FASTMCP_LOG_ENABLED"] = "false"
 from fastmcp import FastMCP
 
 # Bootstrap logger — always writes to stderr to keep stdout clean for stdio transport

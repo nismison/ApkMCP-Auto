@@ -17,6 +17,8 @@ import json
 import time
 import xml.etree.ElementTree as ET
 from typing import List, Union, Dict, Optional, Callable, Any
+
+os.environ["FASTMCP_LOG_ENABLED"] = "false"
 from fastmcp import FastMCP
 
 # Set up logging configuration
